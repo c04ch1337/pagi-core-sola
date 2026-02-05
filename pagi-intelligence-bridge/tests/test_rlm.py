@@ -64,6 +64,49 @@ def test_rlm_mock_mode_converges(monkeypatch):
     assert "mock" in data["summary"].lower()
 
 
+def test_mock_mode_disabled(monkeypatch):
+    """With PAGI_MOCK_MODE=true, POST /rlm with mock_mode=false yields real path; response is NOT generic mock message."""
+    monkeypatch.setenv("PAGI_MOCK_MODE", "true")
+    monkeypatch.setenv(
+        "PAGI_RLM_STUB_JSON",
+        '{"thought":"Real path response.","action":null,"is_final":true}',
+    )
+    r = client.post(
+        "/rlm",
+        json={"query": "what is your name", "context": "", "depth": 0, "mock_mode": False},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "MockMode thought" not in data["summary"]
+    assert "Real path response" in data["summary"]
+
+
+def test_rlm_request_mock_mode_override_env(monkeypatch):
+    """Request mock_mode=false overrides PAGI_MOCK_MODE=true; structured path runs and stub thought is returned."""
+    monkeypatch.setenv("PAGI_MOCK_MODE", "true")
+    monkeypatch.setenv(
+        "PAGI_RLM_STUB_JSON",
+        '{"thought":"I am Sola, your personal AGI companion.","action":null,"is_final":true}',
+    )
+    r = client.post(
+        "/rlm",
+        json={
+            "query": "what is your name",
+            "context": "",
+            "depth": 0,
+            "mock_mode": False,
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    # Must NOT be the generic mock short-circuit message (request override took effect)
+    assert "MockMode thought" not in data["summary"]
+    # Structured path ran: stub thought returned
+    assert "Sola" in data["summary"]
+
+
 def test_rlm_structured_stub_json_is_final(monkeypatch):
     """Structured JSON enforcement: stub response with is_final true should converge."""
     monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
@@ -730,3 +773,632 @@ def test_auto_evolve_from_patch():
     full_path = (bridge_root / path_str.replace("\\", "/")).resolve()
     assert full_path.exists()
     full_path.unlink()
+
+
+def test_local_dispatch_track_health(monkeypatch):
+    """track_health skill returns summary via local dispatch; converged and summary contains kb_health."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Tracked health metrics.",'
+        '"action":{"skill_name":"track_health","params":{"metrics":{"weight":70,"steps":5000},"kb_name":"kb_health}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Track my health metrics", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "kb_health" in data["summary"]
+    assert "Tracked" in data["summary"] or "stub" in data["summary"].lower()
+
+
+def test_local_dispatch_manage_finance(monkeypatch):
+    """manage_finance skill returns summary via local dispatch; converged and summary contains kb_finance."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Budget updated.",'
+        '"action":{"skill_name":"manage_finance","params":{"data":{"budget":2000,"spent":1200},"kb_name":"kb_finance}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Update my budget", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "kb_finance" in data["summary"]
+    assert "Finance" in data["summary"] or "stub" in data["summary"].lower() or "remainder" in data["summary"]
+
+
+def test_local_dispatch_post_social(monkeypatch):
+    """post_social skill returns confirmation via local dispatch; converged and summary contains kb_social."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Post logged.",'
+        '"action":{"skill_name":"post_social","params":{"content":"Hello world","platform":"stub","kb_name":"kb_social}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Post to social", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "kb_social" in data["summary"]
+    assert "Post" in data["summary"] or "stub" in data["summary"].lower()
+
+
+def test_local_dispatch_manage_email(monkeypatch):
+    """manage_email skill returns summary via local dispatch; converged and summary contains kb_email."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Email stub done.",'
+        '"action":{"skill_name":"manage_email","params":{"action":"read","content":"","kb_name":"kb_email}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Check email", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "kb_email" in data["summary"]
+    assert "Email" in data["summary"] or "stub" in data["summary"].lower()
+
+
+def test_local_dispatch_track_health_metrics(monkeypatch):
+    """track_health_metrics skill returns [track_health_metrics] Logged via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Logged health metrics.",'
+        '"action":{"skill_name":"track_health_metrics","params":{"metrics":{"weight":70,"steps":5000},"kb_name":"kb_health}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Log my health metrics", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[track_health_metrics] Logged" in data["summary"]
+
+
+def test_local_dispatch_query_health_trends(monkeypatch):
+    """query_health_trends skill returns trends summary via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Queried health trends.",'
+        '"action":{"skill_name":"query_health_trends","params":{"query":"steps","period_days":30,"kb_name":"kb_health}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "What are my health trends", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[query_health_trends]" in data["summary"]
+
+
+def test_local_dispatch_health_reminder(monkeypatch):
+    """health_reminder skill returns [health_reminder] Reminder set via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Reminder set.",'
+        '"action":{"skill_name":"health_reminder","params":{"type":"vitamins","frequency":"daily","kb_name":"kb_health}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Remind me to take vitamins daily", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[health_reminder] Reminder set" in data["summary"]
+
+
+def test_local_dispatch_track_transactions(monkeypatch):
+    """track_transactions skill returns [track_transactions] Logged N transactions via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Logged transactions.",'
+        '"action":{"skill_name":"track_transactions","params":{"transactions":[{"amount":50,"category":"food"}],"kb_name":"kb_finance}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Log my transactions", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[track_transactions] Logged" in data["summary"]
+    assert "1 transactions" in data["summary"]
+
+
+def test_local_dispatch_get_balance_summary(monkeypatch):
+    """get_balance_summary skill returns balance summary via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Balance summary.",'
+        '"action":{"skill_name":"get_balance_summary","params":{"period_days":30,"kb_name":"kb_finance}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "What is my balance summary", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[get_balance_summary]" in data["summary"]
+
+
+def test_local_dispatch_budget_alert(monkeypatch):
+    """budget_alert skill returns [budget_alert] Alert set for {category} via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Alert set.",'
+        '"action":{"skill_name":"budget_alert","params":{"category":"food","limit":500,"kb_name":"kb_finance}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Alert me when food spending exceeds 500", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[budget_alert] Alert set for food" in data["summary"]
+
+
+def test_local_dispatch_track_investment(monkeypatch):
+    """track_investment skill returns [track_investment] Logged {action} {quantity} {ticker} @ {price} via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Logged investment.",'
+        '"action":{"skill_name":"track_investment","params":{"ticker":"AAPL","action":"buy","quantity":10,"price":150,"kb_name":"kb_finance}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Log a buy of 10 AAPL at 150", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[track_investment] Logged" in data["summary"]
+    assert "buy" in data["summary"] and "AAPL" in data["summary"]
+
+
+def test_local_dispatch_get_portfolio_summary(monkeypatch):
+    """get_portfolio_summary skill returns portfolio summary via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Portfolio summary.",'
+        '"action":{"skill_name":"get_portfolio_summary","params":{"period_days":30,"kb_name":"kb_finance}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "What is my portfolio summary", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[get_portfolio_summary]" in data["summary"]
+
+
+def test_local_dispatch_investment_alert(monkeypatch):
+    """investment_alert skill returns [investment_alert] Alert set for {ticker} {alert_type} {threshold} via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Alert set.",'
+        '"action":{"skill_name":"investment_alert","params":{"ticker":"AAPL","alert_type":"price_above","threshold":200,"kb_name":"kb_finance}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Alert me when AAPL goes above 200", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[investment_alert] Alert set for AAPL" in data["summary"]
+    assert "price_above" in data["summary"]
+
+
+def test_local_dispatch_track_social_activity(monkeypatch):
+    """track_social_activity skill returns [track_social_activity] Logged {action} on {platform} via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Logged social activity.",'
+        '"action":{"skill_name":"track_social_activity","params":{"platform":"Twitter","action":"post","content_summary":"Hello world","kb_name":"kb_social}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Log a post on Twitter", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[track_social_activity] Logged" in data["summary"]
+    assert "Twitter" in data["summary"]
+
+
+def test_local_dispatch_query_social_trends(monkeypatch):
+    """query_social_trends skill returns trends summary via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Queried social trends.",'
+        '"action":{"skill_name":"query_social_trends","params":{"period_days":30,"kb_name":"kb_social}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "What are my social trends", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[query_social_trends]" in data["summary"]
+
+
+def test_local_dispatch_social_sentiment(monkeypatch):
+    """social_sentiment skill returns [social_sentiment] Overall: positive/negative/neutral via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Sentiment analyzed.",'
+        '"action":{"skill_name":"social_sentiment","params":{"content":"I love this product","kb_name":"kb_social}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Analyze sentiment of this post", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[social_sentiment] Overall:" in data["summary"]
+
+
+def test_local_dispatch_track_email(monkeypatch):
+    """track_email skill returns [track_email] Logged {action}: {subject} via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Logged email.",'
+        '"action":{"skill_name":"track_email","params":{"action":"sent","subject":"Hello","summary":"Brief","kb_name":"kb_email}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Log a sent email", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[track_email] Logged" in data["summary"]
+    assert "Hello" in data["summary"]
+
+
+def test_local_dispatch_query_email_history(monkeypatch):
+    """query_email_history skill returns history summary via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Queried email history.",'
+        '"action":{"skill_name":"query_email_history","params":{"period_days":30,"kb_name":"kb_email}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "What is my email history", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[query_email_history]" in data["summary"]
+
+
+def test_local_dispatch_email_draft(monkeypatch):
+    """email_draft skill returns [email_draft] Draft generated for {recipient} via local dispatch."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Draft generated.",'
+        '"action":{"skill_name":"email_draft","params":{"recipient":"Bob","subject":"Re:","body":"Hi","kb_name":"kb_email}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Draft an email to Bob", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "[email_draft] Draft generated for Bob" in data["summary"]
+
+
+def test_local_dispatch_track_calendar_event(monkeypatch):
+    """track_calendar_event skill returns event logged summary via local dispatch; assert converged and 'logged' in summary."""
+    monkeypatch.setenv("PAGI_ACTIONS_VIA_GRPC", "false")
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    monkeypatch.delenv("PAGI_MOCK_MODE", raising=False)
+    monkeypatch.setenv("PAGI_MOCK_MODE", "false")
+
+    stub = (
+        '{'
+        '"thought":"Event added.",'
+        '"action":{"skill_name":"track_calendar_event","params":{"title":"Meeting","start_time":"2025-02-05T14:00:00","end_time":"2025-02-05T15:00:00","kb_name":"kb_calendar}},'
+        '"is_final":true'
+        '}'
+    )
+    monkeypatch.setenv("PAGI_RLM_STUB_JSON", stub)
+
+    r = client.post(
+        "/rlm",
+        json={"query": "Add a meeting tomorrow at 2pm", "context": "", "depth": 0},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["converged"] is True
+    assert "logged" in data["summary"].lower()
+    assert "Meeting" in data["summary"] or "track_calendar_event" in data["summary"]
+
+
+def test_kb_memory_search(monkeypatch):
+    """POST /api/memory then GET /api/search: backend proxies to gRPC UpsertVectors and SemanticSearch; assert hit contains content."""
+    from src.pagi_pb import pagi_pb2
+
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    mock_stub = MagicMock()
+    mock_stub.UpsertVectors.return_value = pagi_pb2.UpsertResponse(success=True, upserted_count=1)
+    mock_stub.SemanticSearch.return_value = pagi_pb2.SearchResponse(
+        hits=[pagi_pb2.SearchHit(document_id="id1", score=0.9, content_snippet="test content")]
+    )
+
+    with patch("src.main._get_kb_stub", return_value=mock_stub), patch(
+        "src.main._embed_content", return_value=[0.1] * 384
+    ):
+        r_upsert = client.post(
+            "/api/memory",
+            json={"kb_name": "kb_personal", "content": "test content"},
+        )
+        assert r_upsert.status_code == 200
+        data_upsert = r_upsert.json()
+        assert data_upsert.get("success") is True
+        assert data_upsert.get("upserted_count") == 1
+
+        r_search = client.get("/api/search", params={"query": "test", "kb_name": "kb_personal"})
+        assert r_search.status_code == 200
+        data_search = r_search.json()
+        assert "hits" in data_search
+        hits = data_search["hits"]
+        assert len(hits) == 1
+        assert "test content" in (hits[0].get("content") or "")
+        assert hits[0].get("score") == 0.9
+
+
+def test_health_kb_routes(monkeypatch):
+    """POST /api/health/track and GET /api/health/trends: proxy to kb_health; assert success and hits."""
+    from src.pagi_pb import pagi_pb2
+
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    mock_stub = MagicMock()
+    mock_stub.UpsertVectors.return_value = pagi_pb2.UpsertResponse(success=True, upserted_count=1)
+    mock_stub.SemanticSearch.return_value = pagi_pb2.SearchResponse(
+        hits=[pagi_pb2.SearchHit(document_id="h1", score=0.85, content_snippet="weight 70 steps 5000")]
+    )
+
+    with patch("src.main._get_kb_stub", return_value=mock_stub), patch(
+        "src.main._embed_content", return_value=[0.1] * 384
+    ):
+        r_track = client.post(
+            "/api/health/track",
+            json={"metrics": {"weight": 70, "steps": 5000}},
+        )
+        assert r_track.status_code == 200
+        data_track = r_track.json()
+        assert data_track.get("success") is True
+        assert "id" in data_track
+
+        r_trends = client.get("/api/health/trends", params={"query": "steps", "period_days": 30})
+        assert r_trends.status_code == 200
+        data_trends = r_trends.json()
+        assert "trends" in data_trends
+        trends = data_trends["trends"]
+        assert len(trends) == 1
+        assert "weight" in (trends[0].get("content") or "") or "steps" in (trends[0].get("content") or "")
+        assert trends[0].get("score") == 0.85
+
+
+def test_finance_kb_routes(monkeypatch):
+    """POST /api/finance/track and GET /api/finance/summary: proxy to kb_finance; assert success and summary."""
+    from src.pagi_pb import pagi_pb2
+
+    monkeypatch.setenv("PAGI_ALLOW_LOCAL_DISPATCH", "true")
+    mock_stub = MagicMock()
+    mock_stub.UpsertVectors.return_value = pagi_pb2.UpsertResponse(success=True, upserted_count=1)
+    mock_stub.SemanticSearch.return_value = pagi_pb2.SearchResponse(
+        hits=[pagi_pb2.SearchHit(document_id="f1", score=0.88, content_snippet="budget 2000 spent 1200")]
+    )
+
+    with patch("src.main._get_kb_stub", return_value=mock_stub), patch(
+        "src.main._embed_content", return_value=[0.1] * 384
+    ):
+        r_track = client.post(
+            "/api/finance/track",
+            json={"transactions": [{"amount": -50, "category": "food"}]},
+        )
+        assert r_track.status_code == 200
+        data_track = r_track.json()
+        assert data_track.get("success") is True
+        assert data_track.get("upserted_count") == 1
+
+        r_summary = client.get("/api/finance/summary", params={"query": "budget", "period_days": 30})
+        assert r_summary.status_code == 200
+        data_summary = r_summary.json()
+        assert "summary" in data_summary
+        summary = data_summary["summary"]
+        assert len(summary) == 1
+        assert "budget" in (summary[0].get("content") or "") or "spent" in (summary[0].get("content") or "")
+        assert summary[0].get("score") == 0.88

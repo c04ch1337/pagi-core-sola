@@ -19,6 +19,16 @@ The Phoenix AGI stack consists of:
 - **Bare Metal:** Run orchestrator and bridge natively; Qdrant optional via `PAGI_DISABLE_QDRANT=true` for loop/action testing.
 - **Optional deployment:** Docker Compose is provided for convenience only; see [§5](#5-optional-docker-compose-deployment).
 
+### 1.1 Security / Sovereignty: backend-mediated LLM gateway
+
+For bare-metal verifiability and key hygiene, **LLM provider API keys MUST NOT be present in the browser**.
+
+- Frontend sends OpenAI-style `messages[]` to the bridge.
+- Bridge performs outbound inference using `PAGI_OPENROUTER_API_KEY` from the backend environment.
+- Outbound calls are disabled by default and require `PAGI_ALLOW_OUTBOUND=true`.
+
+**HTTP endpoint:** `POST /llm-gateway` (bridge)
+
 ---
 
 ## 2. API/IPC Schema for the 8 Knowledge Bases

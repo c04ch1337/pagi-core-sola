@@ -1,6 +1,8 @@
-# Phoenix AGI (pagi)
+# PAGI Core Sola – Personal AGI App
 
-High-level blueprint for a recursive AGI system with tiered memory, self-healing, and bare-metal sovereignty.
+High-level blueprint for a recursive AGI system with tiered memory, self-healing, and bare-metal sovereignty. First app: **pagi-core-sola** for personal AGI (web dev/coding, personal KBs/skills).
+
+**Branding:** The UI reflects PAGI Core Sola (Sola) for the personal AGI use-case; app title and persona strings use "Sola" or "PAGI Core Sola". Customize **User Alias** in Settings (Sola uses it for chat greetings and labels). The default Sola logo lives in `pagi-frontend/src/assets/sola-logo.svg` and is served from `public/sola-logo.svg`; replace with your own via Settings → Custom Logo URL or by replacing the SVG file.
 
 ## Architecture
 
@@ -25,6 +27,23 @@ High-level blueprint for a recursive AGI system with tiered memory, self-healing
 
 Copy `.env.example` to `.env` and customize. Load before run: `source .env` (Unix) or set vars manually (Windows), or use `make run` (Makefile runs `load-env` and sources `.env` when present). Ports, depth cap, Qdrant URI, and self-evolution paths are configurable; see `.env.example` for all keys.
 
+### Sovereign / full-access and always-on
+
+To give the AGI **full control and broad access** (file system, OS, applications, network, outbound LLM, always-on), use the **opt-in sovereign profile**. This is intended only for a trusted, isolated machine where you accept the risk of the agent reading/writing files, running code, and calling external APIs.
+
+| Goal | What to set |
+|------|-------------|
+| **File system** | Set `PAGI_PROJECT_ROOT=/` (Unix) or `PAGI_PROJECT_ROOT=C:\` (Windows). All allow-listed file skills (e.g. `read_entire_file_safe`, `write_file_safe`, `list_dir`, `search_codebase`) then operate under that root. |
+| **OS / applications** | Same root allows the agent to see and work with any path under the drive. Running tests and code is already allowed via `run_tests` and `run_python_code_safe` when local or real dispatch is on. |
+| **Shares / network** | Mount network shares under `PAGI_PROJECT_ROOT` so they are visible to file skills. Outbound HTTP (LLM, APIs) requires `PAGI_ALLOW_OUTBOUND=true`. |
+| **Full internet (LLM)** | Set `PAGI_ALLOW_OUTBOUND=true` and provide `PAGI_OPENROUTER_API_KEY`. The bridge can then call OpenRouter/LiteLLM for real LLM responses. |
+| **Unrestricted skill execution** | Set `PAGI_ALLOW_LOCAL_DISPATCH=true` (in-process allow-listed L5 skills). For Rust-mediated execution with timeout, also set `PAGI_ACTIONS_VIA_GRPC=true` and `PAGI_ALLOW_REAL_DISPATCH=true`. |
+| **Always on** | Run the stack without `--reload` so the bridge and orchestrator stay up. Use `make run-always-on` (orchestrator + bridge, no reload; bridge bound to `0.0.0.0`), or run the bridge and orchestrator as a system service (e.g. systemd, PM2, Windows Service). |
+
+In `.env.example`, a commented **Sovereign / full-access profile** block lists the suggested vars; uncomment and set them as needed. **Full internet browsing** (automated browser or scraping) is not included by default; add an L5 skill that uses requests/Playwright and gate it behind the same profile if you want the agent to drive a browser or fetch arbitrary URLs.
+
+**Warning:** With full-access enabled, the agent can modify or delete files under `PAGI_PROJECT_ROOT`, run tests/code, and call external APIs. Use only in an environment you control and trust.
+
 ## Quick Start
 
 ```bash
@@ -36,7 +55,17 @@ make run
 
 ## Frontend Integration
 
-Copy your UI (e.g. from **Google AI Studio**) into `pagi-frontend/src/`, then run `make run-frontend` (or `cd pagi-frontend && npm start`). Point the frontend at the bridge and orchestrator: **HTTP** via `PAGI_HTTP_PORT` (default 8000) for `/rlm`, `/rlm-multi-turn`, `/health`; **gRPC** via `PAGI_GRPC_ADDR` (default `[::1]:50051`) for memory, actions, and self-heal. Set `PAGI_FRONTEND_PORT` in `.env` if your app uses a different dev port (e.g. 3000).
+Copy your UI (e.g. from **Google AI Studio**) into `pagi-frontend/components/` (and `pagi-frontend/services/`), then run `make run-frontend` (or `cd pagi-frontend && npm run dev`). Point the frontend at the bridge and orchestrator: **HTTP** via `PAGI_HTTP_PORT` (default 8000) for `/rlm`, `/rlm-multi-turn`, `/health`, and the backend-mediated `/llm-gateway`; **gRPC** via `PAGI_GRPC_ADDR` (default `[::1]:50051`) for memory, actions, and self-heal. Secrets (OpenRouter keys) live only in the backend `.env` (no browser exposure).
+
+**E2E verification:** Run `make verify-frontend-e2e` to start the bridge with `PAGI_ALLOW_LOCAL_DISPATCH=true` and `PAGI_VERTICAL_USE_CASE=personal`, send a sample `POST /rlm-multi-turn` request, and assert the response and log (EXECUTING/ACTION lines). Requires backend (bridge) running; use Git Bash on Windows for the script.
+
+### Personal KB Integration
+
+In the **System Registry** view, use the **Personal KB Integration** block to upload text and run semantic search. **UI tabs for features:** switch between **Personal**, **Health**, **Finance**, **Social**, and **Email** KBs; each tab uses the corresponding `kb_name` (`kb_personal`, `kb_health`, `kb_finance`, `kb_social`, `kb_email`) for upload and search. POST to bridge `/api/memory` with `kb_name` and `content`; GET `/api/search` with `query` and `kb_name`. Results are shown as hits with score and content. The backend proxies these to Rust gRPC **UpsertVectors** and **SemanticSearch** (L4 semantic memory). Routes are gated by `PAGI_ALLOW_LOCAL_DISPATCH=true` or `PAGI_VERTICAL_USE_CASE=personal`; the orchestrator must be running with L4/Qdrant for real persistence.
+
+**Health KB:** Dedicated endpoints for kb_health: POST `/api/health/track` with body `{ "metrics": { "weight": 70, "steps": 5000 } }` to log metrics; GET `/api/health/trends?query=steps&period_days=30` to retrieve trends. **Health Tab UI:** In System Registry, the Health tab provides a metrics input (weight, steps) and a "Track" button that calls `healthTrack`; trends from `healthTrends` are shown in the search results. Same gating as above. Enable **Personal Health Tracking** in Settings (feature flag) to pass `feature_flags.health` to `/rlm-multi-turn` for health-aware RLM.
+
+**Finance KB:** Dedicated endpoints for kb_finance: POST `/api/finance/track` with body `{ "transactions": [ { "amount": -50, "category": "food" } ] }` to log transactions; GET `/api/finance/summary?query=budget&period_days=30` to retrieve balance/trends summary. **Finance Tab UI:** In System Registry, the Finance tab provides transaction input (amount, category, date) and a "Track" button that calls `financeTrack`; balance summary from `financeSummary` is shown in the search results. Same gating as above. Enable **Personal Finance Tracking** in Settings (feature flag) to pass `feature_flags.finance` to `/rlm-multi-turn` for finance-aware RLM.
 
 ### Validate Proto (Python)
 
@@ -62,12 +91,23 @@ This compiles `pagi.proto` to Python stubs under `src/pagi_pb/` and prints gener
 - Test Rust heal: `make test-rust-heal`
   - Requires orchestrator running (`make run` or run core-orchestrator separately). Triggers `SimulateError` → propose → poll for `PAGI_APPROVE_FLAG` (up to `PAGI_HITL_POLL_SECS`) → apply when flag present or after timeout (HITL denial); orchestrator appends "Heal cycle simulated" to `PAGI_SELF_HEAL_LOG`.
   - Asserts that log entry; use Git Bash on Windows for grep/sleep. To test apply with HITL: create `approve.patch` (or `PAGI_APPROVE_FLAG`) in the core dir before the poll window ends.
+  - **On Windows:** run `cargo test -- --test-threads=1` (and set `PAGI_SKIP_APPLY_TEST=true` if needed) to avoid LNK1104/exe lock; some apply_patch tests are gated off on Windows via `#[cfg(not(target_os = "windows"))]`.
 - Force test-failure path: `make test-fail-sim` (or `PAGI_FORCE_TEST_FAIL=true make test-rust-heal`)
   - With `PAGI_FORCE_TEST_FAIL=true`, `apply_patch` skips real tests and returns an internal error; `SimulateError` passes HITL so this path is exercised, still logs and returns Ok for assertion.
 
 ## Verifying L5 chaining (peek → execute → save)
 
-With local dispatch enabled, the RLM can chain allow-listed skills via `execute_skill`. Run the steps below to observe the full Think → Act → Observe loop without Rust.
+With local dispatch enabled, the RLM can chain allow-listed skills via `execute_skill`. Run the steps below to observe the full Think → Act → Observe loop without Rust. **Request `mock_mode=false` overrides `PAGI_MOCK_MODE` env** — see `test_rlm_request_mock_mode_override_env` in `pagi-intelligence-bridge/tests/test_rlm.py`.
+
+### Disable Mock Mode
+
+To use the real LLM path globally and per request:
+
+- **Globally:** In `pagi-intelligence-bridge/.env` set `PAGI_MOCK_MODE=false` (or remove/comment the line; default is false). Ensure `PAGI_ALLOW_OUTBOUND=true` and `PAGI_OPENROUTER_API_KEY=sk-or-v1-your-key` for real calls.
+- **Per request:** Send `mock_mode: false` in the JSON body of `POST /rlm` (and `/rlm-multi-turn`); this overrides `PAGI_MOCK_MODE` for that request.
+- **Confirm real LLM:** After restarting the bridge (`poetry run uvicorn src.main:app --port 8000`), check startup logs for `Effective PAGI_MOCK_MODE`, `Effective PAGI_ALLOW_OUTBOUND`, and `LLM key present: yes`. If mock is active, the bridge prints `Mock mode active – returning generic response`. Test with:  
+  `curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" -d "{\"query\":\"what is your name\",\"mock_mode\":false}"`  
+  You should get a non-generic reply (no "MockMode thought" in the summary).
 
 **1. Start the bridge**
 
@@ -216,6 +256,36 @@ curl -X POST http://127.0.0.1:8000/rlm \
 
 Use a stub with `"skill_name":"run_python_code_safe"` and `"params":{"code":"print(2 + 2)","timeout_sec":5,"max_output_len":4096}` to get the snippet output (e.g. `4`) or a prefixed error.
 
+Personal vertical L5 skills (stubs; use with `PAGI_VERTICAL_USE_CASE=personal` and `PAGI_ALLOW_LOCAL_DISPATCH=true`):
+
+- **track_health** – stub save health metrics to kb_health:
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Track my health metrics","context":"","depth":0}'
+# Stub: PAGI_RLM_STUB_JSON with "skill_name":"track_health","params":{"metrics":{"weight":70,"steps":5000},"kb_name":"kb_health"},"is_final":true
+```
+
+- **manage_finance** – stub budgeting to kb_finance:
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Update my budget","context":"","depth":0}'
+# Stub: "skill_name":"manage_finance","params":{"data":{"budget":2000,"spent":1200},"kb_name":"kb_finance"},"is_final":true
+```
+
+- **post_social** – stub post to kb_social (no real API):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Post to social","context":"","depth":0}'
+# Stub: "skill_name":"post_social","params":{"content":"Hello","platform":"stub","kb_name":"kb_social"},"is_final":true
+```
+
+- **manage_email** – stub read/send to kb_email (no real API):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Check email","context":"","depth":0}'
+# Stub: "skill_name":"manage_email","params":{"action":"read","content":"","kb_name":"kb_email"},"is_final":true
+```
+
 Analyze code snippet for errors (RCA primitive with `analyze_code`):
 
 ```bash
@@ -237,6 +307,8 @@ Use a stub with `"skill_name":"analyze_code"` and `"params":{"code":"fn main() {
 - **Response body:** `RLMSummary` with `converged=true` and a synthesis that includes the chain result.
 
 Once you see chained observations logged and returned, the local L5 chaining loop is verified. **Automated run:** from the project root, `make verify-l5-chain` (requires poetry, curl; optional jq) starts the bridge with stub env, triggers the chain, and greps `agent_actions.log` for EXECUTING/THOUGHT/OBSERVATION. If env is not visible to the bridge (e.g. reloader child on some setups), use `make verify-l5-chain-no-reload` instead — it runs uvicorn without `--reload` so the single process inherits env and the list_dir stub runs. Next options: add more primitive skills or wire real Rust-mediated dispatch (sandbox, timeout, allow-list from registry).
+
+**UI Verification:** Run the frontend (`make run-frontend` or `cd pagi-frontend && npm run dev`), set Settings → Bridge URL to the bridge (e.g. `http://127.0.0.1:8000` if the bridge runs on `PAGI_HTTP_PORT=8000`). Send a multi-turn query in ChatView; the response shows each RLM turn (THOUGHT/ACTION/OBSERVATION) as chat bubbles, with "Continuing..." when the last turn has `converged=false`. Check the browser network tab for `POST …/rlm-multi-turn` and the bridge terminal for THOUGHT/EXECUTING lines.
 
 ### Multi-turn RLM session
 
@@ -292,6 +364,173 @@ curl -X POST http://127.0.0.1:8000/rlm \
 ```
 
 Use a real model or `PAGI_RLM_STUB_JSON` with `is_final: true` and a `thought` containing code; the response summary will include "Codegen write" and the path under `codegen_output/`.
+
+### Vertical: Personal AGI
+
+With `PAGI_VERTICAL_USE_CASE=personal`, the RLM prioritizes web dev/coding, personal KB use, and code generation/run/save. Sub-features use dedicated KBs: **health** (`PAGI_PERSONAL_HEALTH_KB=kb_health`), **finance** (`PAGI_PERSONAL_FINANCE_KB=kb_finance`), **social** (`PAGI_PERSONAL_SOCIAL_KB=kb_social`), **email** (`PAGI_PERSONAL_EMAIL_KB=kb_email`). Use KB names in upload/search (e.g. `kb_name` in `/api/memory` and `/api/search`). On convergence (`is_final: true`), the bridge forces a chain: **search_codebase** → **analyze_code** → **run_tests** → **write_file_safe** to `codegen_output/personal_<timestamp>.py`. Requires `PAGI_ALLOW_LOCAL_DISPATCH=true` or gRPC dispatch.
+
+Examples (bridge with personal vertical and local dispatch):
+
+```bash
+# Web dev / general
+curl -X POST http://127.0.0.1:8000/rlm \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Generate a web dev script and test it", "context": "", "depth": 0}'
+
+# Health KB: upload then search (use kb_name=kb_health)
+curl -X POST http://127.0.0.1:8000/api/memory -H "Content-Type: application/json" \
+  -d '{"kb_name": "kb_health", "content": "Weight 70kg, steps 5000 today"}'
+curl "http://127.0.0.1:8000/api/search?query=steps%20today&kb_name=kb_health"
+
+# Finance KB
+curl -X POST http://127.0.0.1:8000/api/memory -H "Content-Type: application/json" \
+  -d '{"kb_name": "kb_finance", "content": "Monthly budget 2000, spent 1200"}'
+curl "http://127.0.0.1:8000/api/search?query=budget&kb_name=kb_finance"
+
+# Social KB (stub)
+curl -X POST http://127.0.0.1:8000/api/memory -H "Content-Type: application/json" \
+  -d '{"kb_name": "kb_social", "content": "Posted: Hello world"}'
+curl "http://127.0.0.1:8000/api/search?query=posts&kb_name=kb_social"
+```
+
+**Social Features** (L5 skills gated by personal vertical and `PAGI_ALLOW_LOCAL_DISPATCH=true`):
+
+- **track_social_activity** – log social activity to kb_social (gRPC UpsertVectors when orchestrator is up):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Log a post on Twitter","context":"","depth":0}'
+# Stub: "skill_name":"track_social_activity","params":{"platform":"Twitter","action":"post","content_summary":"Hello world","kb_name":"kb_social"},"is_final":true
+# Or use dedicated route: POST /api/social/track with body {"platform":"Twitter","action":"post","content_summary":"Hello world"}
+```
+
+- **query_social_trends** – query social activity patterns from kb_social:
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"What are my social trends","context":"","depth":0}'
+# Stub: "skill_name":"query_social_trends","params":{"period_days":30,"kb_name":"kb_social"},"is_final":true
+# Or: GET /api/social/trends?period_days=30
+```
+
+- **social_sentiment** – stub sentiment analysis (keyword-based positive/negative/neutral):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Analyze sentiment of this post","context":"","depth":0}'
+# Stub: "skill_name":"social_sentiment","params":{"content":"I love this product","kb_name":"kb_social"},"is_final":true
+# Or: POST /api/social/sentiment with body {"content":"I love this product"}
+```
+
+# Email KB (stub)
+```bash
+curl -X POST http://127.0.0.1:8000/api/memory -H "Content-Type: application/json" \
+  -d '{"kb_name": "kb_email", "content": "Inbox summary: 3 unread"}'
+curl "http://127.0.0.1:8000/api/search?query=inbox&kb_name=kb_email"
+```
+
+**Email Features** (L5 skills gated by personal vertical and `PAGI_ALLOW_LOCAL_DISPATCH=true`):
+
+- **track_email** – log email events (sent/received/draft) to kb_email:
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Log a sent email","context":"","depth":0}'
+# Stub: "skill_name":"track_email","params":{"action":"sent","subject":"Hello","summary":"Brief","kb_name":"kb_email"},"is_final":true
+# Or: POST /api/email/track with body {"action":"sent","subject":"Hello","summary":"Brief"}
+```
+
+- **query_email_history** – query email history/patterns from kb_email:
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"What is my email history","context":"","depth":0}'
+# Stub: "skill_name":"query_email_history","params":{"period_days":30,"kb_name":"kb_email"},"is_final":true
+# Or: GET /api/email/history?period_days=30
+```
+
+- **email_draft** – generate draft (log-only, no send):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Draft an email to Bob","context":"","depth":0}'
+# Stub: "skill_name":"email_draft","params":{"recipient":"Bob","subject":"Re:","body":"Hi","kb_name":"kb_email"},"is_final":true
+# Or: POST /api/email/draft with body {"recipient":"Bob","subject":"Re:","body":"Hi"}
+```
+
+**Calendar Features** (L5 skill gated by personal vertical and `PAGI_ALLOW_LOCAL_DISPATCH=true`):
+
+- **track_calendar_event** – log calendar events to kb_calendar (recurring, reminders; log-only):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Add a meeting tomorrow at 2pm","context":"","depth":0}'
+# Stub: "skill_name":"track_calendar_event","params":{"title":"Meeting","start_time":"2025-02-05T14:00:00","end_time":"2025-02-05T15:00:00","kb_name":"kb_calendar"},"is_final":true
+# Or: POST /api/calendar/track with body {"title":"Meeting","start_time":"2025-02-05T14:00:00","end_time":"2025-02-05T15:00:00"}
+# Recent events: GET /api/search?query=events&kb_name=kb_calendar
+```
+
+**Health Features** (L5 skills gated by personal vertical and `PAGI_ALLOW_LOCAL_DISPATCH=true`):
+
+- **track_health_metrics** – log metrics to kb_health (gRPC UpsertVectors when orchestrator is up):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Log my health metrics","context":"","depth":0}'
+# Stub: PAGI_RLM_STUB_JSON with "skill_name":"track_health_metrics","params":{"metrics":{"weight":70,"steps":5000},"kb_name":"kb_health"},"is_final":true
+```
+
+- **query_health_trends** – semantic search over kb_health:
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"What are my health trends","context":"","depth":0}'
+# Stub: "skill_name":"query_health_trends","params":{"query":"steps weight","period_days":30,"kb_name":"kb_health"},"is_final":true
+```
+
+- **health_reminder** – stub set reminder (log-only):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Remind me to take vitamins daily","context":"","depth":0}'
+# Stub: "skill_name":"health_reminder","params":{"type":"vitamins","frequency":"daily","kb_name":"kb_health"},"is_final":true
+```
+
+**Finance Features** (L5 skills gated by personal vertical and `PAGI_ALLOW_LOCAL_DISPATCH=true`):
+
+- **track_transactions** – log transactions to kb_finance (gRPC UpsertVectors when orchestrator is up):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Log my transactions","context":"","depth":0}'
+# Stub: PAGI_RLM_STUB_JSON with "skill_name":"track_transactions","params":{"transactions":[{"amount":50,"category":"food"}],"kb_name":"kb_finance"},"is_final":true
+```
+
+- **get_balance_summary** – query balance/trends from kb_finance:
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"What is my balance summary","context":"","depth":0}'
+# Stub: "skill_name":"get_balance_summary","params":{"period_days":30,"kb_name":"kb_finance"},"is_final":true
+```
+
+- **budget_alert** – stub set budget alert (log-only):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Alert me when food spending exceeds 500","context":"","depth":0}'
+# Stub: "skill_name":"budget_alert","params":{"category":"food","limit":500,"kb_name":"kb_finance"},"is_final":true
+```
+
+- **track_investment** – log buy/sell to kb_finance (gRPC UpsertVectors when orchestrator is up):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Log a buy of 10 AAPL at 150","context":"","depth":0}'
+# Stub: "skill_name":"track_investment","params":{"ticker":"AAPL","action":"buy","quantity":10,"price":150,"kb_name":"kb_finance"},"is_final":true
+```
+
+- **get_portfolio_summary** – query portfolio value/performance from kb_finance:
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"What is my portfolio summary for the last 30 days","context":"","depth":0}'
+# Stub: "skill_name":"get_portfolio_summary","params":{"period_days":30,"kb_name":"kb_finance"},"is_final":true
+```
+
+- **investment_alert** – stub set price/position alert (log-only):
+```bash
+curl -X POST http://127.0.0.1:8000/rlm -H "Content-Type: application/json" \
+  -d '{"query":"Alert me when AAPL goes above 200","context":"","depth":0}'
+# Stub: "skill_name":"investment_alert","params":{"ticker":"AAPL","alert_type":"price_above","threshold":200,"kb_name":"kb_finance"},"is_final":true
+```
+
+Or use the frontend: set Settings → Vertical to **personal**, then send a code-dev query in ChatView; the multi-turn payload will send `vertical_use_case: "personal"` so the bridge uses the personal chain.
 
 ### Vertical: AI Code Review Agent
 

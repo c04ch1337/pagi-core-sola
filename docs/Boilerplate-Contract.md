@@ -98,6 +98,21 @@ These align with `pagi.proto`; the mock provider may expose REST or WebSocket eq
   - `summary`: string
   - `converged`: boolean
 
+### 2.6 LLM Gateway (Backend-mediated Chat Completions)
+
+To prevent frontend exposure of provider secrets, the bridge may expose a backend-mediated gateway for chat completions.
+
+**POST /llm-gateway**
+
+- **Request:**
+  - `model`?: string (OpenRouter model id)
+  - `temperature`?: number
+  - `messages`: Array of `{ role: "system"|"user"|"assistant"; content: string }`
+  - `stream`?: boolean (default true)
+- **Response (stream=true):** Server-Sent Events (`text/event-stream`) with OpenAI-compatible `choices[].delta.content` JSON frames, terminated by `data: [DONE]`.
+
+**Security gates:** provider API keys are loaded from backend env only (e.g. `PAGI_OPENROUTER_API_KEY`); outbound is disabled unless `PAGI_ALLOW_OUTBOUND=true`.
+
 ---
 
 ## 3. WebSocket Agent Events (Real-Time Reasoning)

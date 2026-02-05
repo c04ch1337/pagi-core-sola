@@ -1,4 +1,4 @@
-.PHONY: all build run test clean qdrant load-env check-proto build-incremental health-check debug-self-heal index-kb test-self-heal verify-self-heal-grpc test-rust test-rust-heal test-fail-sim verify-all verify-l5-chain verify-l5-chain-no-reload verify-multi-turn verify-rust-dispatch run-frontend
+.PHONY: all build run test clean qdrant load-env check-proto build-incremental health-check debug-self-heal index-kb test-self-heal verify-self-heal-grpc test-rust test-rust-heal test-fail-sim verify-all verify-l5-chain verify-l5-chain-no-reload verify-multi-turn verify-rust-dispatch verify-frontend-e2e run-frontend template-smoke
 
 all: build
 
@@ -22,9 +22,14 @@ run: load-env
 run-python: load-env
 	. ./.env 2>/dev/null || true; cd pagi-intelligence-bridge && poetry run uvicorn src.main:app --port $${PAGI_HTTP_PORT:-8000} --reload
 
-# Frontend (stub: paste UI in pagi-frontend/src/, then npm start)
+# Always-on: run orchestrator + bridge without --reload (long-lived; full control). Use with PAGI_FULL_ACCESS / PAGI_ALLOW_* in .env for sovereign profile.
+run-always-on: load-env
+	. ./.env 2>/dev/null || true; cd pagi-core-orchestrator && cargo run --release & \
+	. ./.env 2>/dev/null || true; cd pagi-intelligence-bridge && poetry run uvicorn src.main:app --port $${PAGI_HTTP_PORT:-8000} --host 0.0.0.0
+
+# Frontend (UI in pagi-frontend/components/; bridge URL in Settings)
 run-frontend:
-	cd pagi-frontend && npm start
+	cd pagi-frontend && npm run dev
 
 test: load-env
 	. ./.env 2>/dev/null || true; cd pagi-core-orchestrator && cargo test
@@ -189,6 +194,15 @@ verify-rust-dispatch:
 	@pkill -f "cargo run" 2>/dev/null || true
 	@pkill -f "uvicorn src.main:app" 2>/dev/null || true
 	@echo "verify-rust-dispatch complete."
+
+# E2E smoke: start bridge with personal vertical, curl /rlm-multi-turn, assert response and log for EXECUTING.
+# Requires: bash, poetry, curl. Use Git Bash on Windows.
+verify-frontend-e2e:
+	bash scripts/e2e_smoke.sh
+
+# One-command template smoke for CI: poetry install, cargo build, make verify-all.
+template-smoke:
+	bash scripts/template_smoke.sh
 
 # Full blueprint verification: L4 bootstrap, health probes, Python and Rust heal cycle assertions.
 # Requires Qdrant, orchestrator, and bridge running; PAGI_SELF_HEAL_LOG set. Use Git Bash on Windows.

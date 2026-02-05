@@ -66,6 +66,23 @@ impl Pagi for Orchestrator {
             ));
         }
 
+        // Sovereignty gate: outbound LLM usage must be explicitly enabled.
+        // The Python bridge consults this when `PAGI_ACTIONS_VIA_GRPC=true`.
+        if req.skill_name == "llm_gateway" {
+            let allow_outbound = std::env::var("PAGI_ALLOW_OUTBOUND")
+                .ok()
+                .map(|v| {
+                    let v = v.trim().to_lowercase();
+                    v == "true" || v == "1" || v == "yes" || v == "y" || v == "on"
+                })
+                .unwrap_or(false);
+            if !allow_outbound {
+                return Err(Status::permission_denied(
+                    "Outbound LLM calls are disabled (PAGI_ALLOW_OUTBOUND=false)",
+                ));
+            }
+        }
+
         // PAGI_MOCK_MODE precedence: mock path when request asks for mock or env forces mock.
         let env_mock = std::env::var("PAGI_MOCK_MODE")
             .map(|v| v.trim().eq_ignore_ascii_case("true") || v == "1")

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Initialize a new app from the Phoenix AGI core template.
 # Usage: ./scripts/init-new-app.sh /path/to/new-app
-# Run from the template repo root (pagi-phoenix-agi).
+# Run from the template repo root (pagi-core-sola or your clone).
 
 set -e
 DEST="${1:?Usage: $0 /path/to/new-app}"

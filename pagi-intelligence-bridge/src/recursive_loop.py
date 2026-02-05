@@ -65,7 +65,7 @@ def _allow_real_dispatch() -> bool:
 
 
 def _vertical_use_case() -> str:
-    """Configurable vertical. Supported: research (self-patch), codegen (AI codegen), code_review (analyze → run_tests → save to reviewed/). Enables vertical-specific prompts and synthesis hooks."""
+    """Configurable vertical. Supported: research (self-patch), codegen (AI codegen), code_review (analyze → run_tests → save to reviewed/), personal (web dev/coding, personal KB, generate/run code, save to L5). Enables vertical-specific prompts and synthesis hooks."""
     return (os.environ.get("PAGI_VERTICAL_USE_CASE") or "").strip().lower()
 
 
@@ -79,8 +79,8 @@ def _allow_self_heal_grpc() -> bool:
 
 
 def _local_dispatch_allow_list() -> set[str]:
-    # Minimal surface: allow-listed L5 stubs; execute_skill enables chaining; list_dir/list_files_recursive for discovery; analyze_code for RCA; evolve_skill_from_patch for auto-evolve; search_codebase for pattern search; run_tests for pytest/cargo.
-    return {"peek_file", "save_skill", "execute_skill", "list_dir", "read_entire_file_safe", "write_file_safe", "list_files_recursive", "analyze_code", "evolve_skill_from_patch", "search_codebase", "run_tests", "run_python_code_safe"}
+    # Minimal surface: allow-listed L5 stubs; execute_skill enables chaining; list_dir/list_files_recursive for discovery; analyze_code for RCA; evolve_skill_from_patch for auto-evolve; search_codebase for pattern search; run_tests for pytest/cargo; personal vertical: track_health, track_health_metrics, query_health_trends, health_reminder, manage_finance, track_transactions, get_balance_summary, budget_alert, track_investment, get_portfolio_summary, investment_alert, post_social, manage_email.
+    return {"peek_file", "save_skill", "execute_skill", "list_dir", "read_entire_file_safe", "write_file_safe", "list_files_recursive", "analyze_code", "evolve_skill_from_patch", "search_codebase", "run_tests", "run_python_code_safe", "track_health", "track_health_metrics", "query_health_trends", "health_reminder", "manage_finance", "track_transactions", "get_balance_summary", "budget_alert", "track_investment", "get_portfolio_summary", "investment_alert", "track_social_activity", "query_social_trends", "social_sentiment", "post_social", "manage_email", "track_email", "query_email_history", "email_draft", "track_calendar_event"}
 
 
 _skill_module_cache: dict[str, tuple[float, Any]] = {}
@@ -143,7 +143,7 @@ def _execute_action_locally(action: ActionSpec) -> tuple[str, bool, str]:
         params_cls = getattr(mod, _params_class_name(action.skill_name), None)
         if params_cls is None:
             # Back-compat with earlier hard-coded candidates.
-            for cand in ("PeekFileParams", "SaveSkillParams", "ExecuteSkillParams", "ListDirParams", "ReadEntireFileSafeParams", "WriteFileSafeParams", "ListFilesRecursiveParams", "AnalyzeCodeParams", "EvolveSkillFromPatchParams", "SearchCodebaseParams", "RunTestsParams", "RunPythonCodeSafeParams"):
+            for cand in ("PeekFileParams", "SaveSkillParams", "ExecuteSkillParams", "ListDirParams", "ReadEntireFileSafeParams", "WriteFileSafeParams", "ListFilesRecursiveParams", "AnalyzeCodeParams", "EvolveSkillFromPatchParams", "SearchCodebaseParams", "RunTestsParams", "RunPythonCodeSafeParams", "TrackHealthParams", "TrackHealthMetricsParams", "QueryHealthTrendsParams", "HealthReminderParams", "ManageFinanceParams", "TrackTransactionsParams", "GetBalanceSummaryParams", "BudgetAlertParams", "TrackInvestmentParams", "GetPortfolioSummaryParams", "InvestmentAlertParams", "TrackSocialActivityParams", "QuerySocialTrendsParams", "SocialSentimentParams", "PostSocialParams", "ManageEmailParams", "TrackEmailParams", "QueryEmailHistoryParams", "EmailDraftParams", "TrackCalendarEventParams"):
                 if hasattr(mod, cand):
                     params_cls = getattr(mod, cand)
                     break
@@ -220,6 +220,8 @@ class RLMQuery(BaseModel):
     query: str
     context: str = ""
     depth: int = Field(default=0, ge=0, le=MAX_RECURSION_DEPTH)
+    feature_flags: Optional[dict] = None  # e.g. {"health": True, "finance": True} for personal sub-features
+    mock_mode: Optional[bool] = None  # When False: force real RLM (structured/LLM). When True: force mock. When None: use PAGI_MOCK_MODE env.
 
 
 class RLMSummary(BaseModel):
@@ -433,12 +435,14 @@ def _recursive_loop_impl(query: RLMQuery) -> RLMSummary:
         except ValueError:
             pass
 
-    mock_mode = _mock_mode()
+    # Request-level override: mock_mode=false forces real RLM even when PAGI_MOCK_MODE=true (e.g. from UI).
+    mock_mode = query.mock_mode if query.mock_mode is not None else _mock_mode()
     allow_outbound = _env_truthy("PAGI_ALLOW_OUTBOUND", default=False)
     enforce_structured = _env_truthy("PAGI_ENFORCE_STRUCTURED", default=True)
 
     # Phase 3 MockMode: deterministic chain testing without outbound calls.
     if mock_mode:
+        print("Mock mode active – returning generic response")
         rid = str(uuid.uuid4())
         action = ActionSpec(
             skill_name="mock_skill",
@@ -467,6 +471,31 @@ def _recursive_loop_impl(query: RLMQuery) -> RLMSummary:
                     system_prompt = system_prompt + " Prioritize generating code (snippets, tests, refactors). Always end with action: write_file_safe to codegen_output/<filename>"
                 elif _vertical_use_case() == "code_review":
                     system_prompt = system_prompt + " Prioritize code review: analyze for issues, propose fixes, run_tests, save reviewed code."
+                elif _vertical_use_case() == "personal":
+                    system_prompt = system_prompt + " Handle personal health/finance/social/email with dedicated KBs, prioritize privacy/safety. Prioritize web dev/coding tasks, use personal KB, generate/run code, save to L5. Prefer search_codebase, analyze_code, run_tests, write_file_safe."
+                    # Feature flags from frontend: enable specific personal sub-features
+                    if getattr(query, "feature_flags", None) and isinstance(query.feature_flags, dict):
+                        enabled = [k for k, v in query.feature_flags.items() if v]
+                        if enabled:
+                            system_prompt = system_prompt + " Enable " + ", ".join(enabled) + " for personal tasks."
+                            if "finance" in enabled:
+                                system_prompt = system_prompt + " Enable personal finance tracking for budgeting and alerts."
+                            if "calendar" in enabled:
+                                system_prompt = system_prompt + " Enable personal calendar tracking for events and reminders."
+                    # Sub-feature: append vertical-specific guidance when query signals it
+                    q = (query.query or "").lower()
+                    if "health" in q:
+                        system_prompt = system_prompt + " For health: use kb_health for metrics/tracking. Prefer health skills chain: track_health_metrics (log metrics), query_health_trends (trends), health_reminder (reminders)."
+                    if "finance" in q or "budget" in q:
+                        system_prompt = system_prompt + " For finance/budget: use kb_finance for budgeting/data. Prefer finance skills chain: track_transactions (log transactions), get_balance_summary (balance/trends), budget_alert (alerts)."
+                    if "investment" in q or "portfolio" in q or "stock" in q:
+                        system_prompt = system_prompt + " For investment/portfolio/stock: use kb_finance. Prefer investment skills chain: track_investment (log buy/sell), get_portfolio_summary (portfolio value/performance), investment_alert (price/position alerts)."
+                    if "social" in q or "media" in q or "post" in q:
+                        system_prompt = system_prompt + " For social/media/post: use kb_social. Prefer social skills chain: track_social_activity (log posts/likes/follows), query_social_trends (activity patterns), social_sentiment (sentiment analysis)."
+                    if "email" in q or "message" in q or "draft" in q:
+                        system_prompt = system_prompt + " For email/message/draft: use kb_email. Prefer email skills chain: track_email (log sent/received/draft), query_email_history (history/patterns), email_draft (generate draft, log-only)."
+                    if "calendar" in q or "event" in q or "schedule" in q or "reminder" in q:
+                        system_prompt = system_prompt + " For calendar/event/schedule/reminder: use kb_calendar. Prefer track_calendar_event (log events, recurring, reminders)."
                 resp = litellm.completion(
                     model=os.environ.get("PAGI_OPENROUTER_MODEL", "openrouter/auto"),
                     messages=[
@@ -547,6 +576,39 @@ def _recursive_loop_impl(query: RLMQuery) -> RLMSummary:
                     rid = str(uuid.uuid4())
                     write_obs, write_ok, write_err = _execute_action(write_action, depth=query.depth, reasoning_id=rid, mock_mode=False)
                     summary = f"{summary}\nCode review: analyze ok; run_tests: {test_obs[:200]}; write: ok={write_ok} err={write_err}; obs={write_obs[:200]}"
+                # Vertical: personal — when converged, force chain search_codebase → analyze_code → run_tests → write_file_safe (gated by dispatch).
+                elif _vertical_use_case() == "personal" and (_allow_local_dispatch() or _actions_via_grpc()):
+                    root = Path(os.environ.get("PAGI_PROJECT_ROOT", ".")).resolve()
+                    search_action = ActionSpec(
+                        skill_name="search_codebase",
+                        params={"path": str(root), "pattern": "def |class ", "max_files": 20, "mode": "keyword"},
+                    )
+                    rid = str(uuid.uuid4())
+                    search_obs, _, _ = _execute_action(search_action, depth=query.depth, reasoning_id=rid, mock_mode=False)
+                    code_for_analysis = (parsed.thought + "\n" + search_obs)[:4096]
+                    analyze_action = ActionSpec(
+                        skill_name="analyze_code",
+                        params={"code": code_for_analysis, "language": "python", "max_length": 4096},
+                    )
+                    rid = str(uuid.uuid4())
+                    analyze_obs, _, _ = _execute_action(analyze_action, depth=query.depth, reasoning_id=rid, mock_mode=False)
+                    run_tests_action = ActionSpec(
+                        skill_name="run_tests",
+                        params={"dir": str(root), "type": "python", "timeout_sec": 30},
+                    )
+                    rid = str(uuid.uuid4())
+                    test_obs, _, _ = _execute_action(run_tests_action, depth=query.depth, reasoning_id=rid, mock_mode=False)
+                    personal_dir = os.environ.get("PAGI_CODEGEN_OUTPUT_DIR", "codegen_output")
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    personal_path = str(root / personal_dir / f"personal_{ts}.py")
+                    Path(root / personal_dir).mkdir(parents=True, exist_ok=True)
+                    write_action = ActionSpec(
+                        skill_name="write_file_safe",
+                        params={"path": personal_path, "content": f"# Personal AGI\n# RCA: {analyze_obs[:500]}\n\n{parsed.thought}", "overwrite": True},
+                    )
+                    rid = str(uuid.uuid4())
+                    write_obs, write_ok, write_err = _execute_action(write_action, depth=query.depth, reasoning_id=rid, mock_mode=False)
+                    summary = f"{summary}\nPersonal chain: search ok; analyze ok; run_tests: {test_obs[:200]}; write: ok={write_ok}; obs={write_obs[:200]}"
                 # Vertical: self-patch codegen — when converged and query asks for self-patch, write fix to L5 (gated by dispatch).
                 # Optional auto_evolve: when PAGI_AUTO_EVOLVE_SKILLS=true, Watchdog triggers evolve_skill_from_patch after successful python_skill apply.
                 elif "self-patch" in query.query.lower() and _vertical_use_case() == "research":

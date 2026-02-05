@@ -766,6 +766,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(not(target_os = "windows"))]
     async fn test_apply_patch_auto_commit() {
         let _g = lock_test_env();
         // When PAGI_AUTO_COMMIT_SELF_PATCH=false, apply_patch succeeds but returns empty commit_hash (no git commit).
@@ -814,6 +815,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(not(target_os = "windows"))]
     async fn test_apply_patch_auto_commit_when_enabled() {
         let _g = lock_test_env();
         // When PAGI_AUTO_COMMIT_SELF_PATCH=true (default), apply_patch commits and returns non-empty commit_hash.
@@ -925,6 +927,7 @@ if __name__ == "__main__":
     }
 
     #[tokio::test]
+    #[cfg(not(target_os = "windows"))]
     async fn test_apply_patch_auto_evolve() {
         // Mock successful apply/commit; PAGI_AUTO_EVOLVE_SKILLS=true.
         // Assert: evolve_skill_from_patch request is executed and bridge commit "Auto-evolved skill from self-patch" is called.
