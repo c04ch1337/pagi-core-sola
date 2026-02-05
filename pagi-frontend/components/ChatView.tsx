@@ -87,15 +87,22 @@ const ChatView: React.FC<ChatViewProps> = ({ onStatusChange }) => {
 
     setMockConvergedText(null);
     mockConvergedRef.current = null;
-    mockBackend.simulateReasoning(currentInput);
+
+    const bridgeUrl = gemini.getBridgeUrl();
+    const useRlm = bridgeUrl && (bridgeUrl.startsWith('http://') || bridgeUrl.startsWith('https://'));
+    const useMockFromSettings = (() => {
+      try {
+        const s = localStorage.getItem('phoenix_config');
+        const c = s ? JSON.parse(s) : {};
+        return c.useMockModeForRlm === true;
+      } catch { return false; }
+    })();
+    if (useMockFromSettings) mockBackend.simulateReasoning(currentInput);
 
     const assistantId = (Date.now() + 1).toString();
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
 
     try {
-      const bridgeUrl = gemini.getBridgeUrl();
-      const useRlm = bridgeUrl && (bridgeUrl.startsWith('http://') || bridgeUrl.startsWith('https://'));
-
       if (useRlm) {
         const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
         const savedConfig = (() => {
@@ -147,18 +154,28 @@ const ChatView: React.FC<ChatViewProps> = ({ onStatusChange }) => {
         }
       }
     } catch (err) {
-      const fallback = 'Inference sequence failed. Check API key in Settings and backend telemetry.';
+      const fallback = 'Inference sequence failed. Check bridge URL in Settings, ensure the bridge is running, and check the browser console for errors.';
       setMessages(prev =>
         prev.map(m => (m.id === assistantId ? { ...m, content: fallback } : m))
       );
-      const checkMock = () => {
-        const text = mockConvergedRef.current;
-        if (text) {
-          setMessages(prev => prev.map(m => (m.id === assistantId ? { ...m, content: text } : m)));
-        }
-      };
-      setTimeout(checkMock, 100);
-      setTimeout(checkMock, 2500);
+      // Only show mock "Mock Mode" message as fallback when user has Mock Mode enabled in Settings.
+      const useMockFallback = (() => {
+        try {
+          const s = localStorage.getItem('phoenix_config');
+          const c = s ? JSON.parse(s) : {};
+          return c.useMockModeForRlm === true;
+        } catch { return false; }
+      })();
+      if (useMockFallback) {
+        const checkMock = () => {
+          const text = mockConvergedRef.current;
+          if (text) {
+            setMessages(prev => prev.map(m => (m.id === assistantId ? { ...m, content: text } : m)));
+          }
+        };
+        setTimeout(checkMock, 100);
+        setTimeout(checkMock, 2500);
+      }
     } finally {
       setIsStreaming(false);
       onStatusChange('active');

@@ -1,4 +1,4 @@
-.PHONY: all build run test clean qdrant load-env check-proto build-incremental health-check debug-self-heal index-kb test-self-heal verify-self-heal-grpc test-rust test-rust-heal test-fail-sim verify-all verify-l5-chain verify-l5-chain-no-reload verify-multi-turn verify-rust-dispatch verify-frontend-e2e run-frontend template-smoke
+.PHONY: all build run test clean qdrant load-env check-proto build-incremental health-check debug-self-heal index-kb test-self-heal verify-self-heal-grpc test-rust test-rust-heal test-fail-sim verify-all verify-l5-chain verify-l5-chain-no-reload verify-multi-turn verify-rust-dispatch verify-frontend-e2e run-frontend template-smoke start-all
 
 all: build
 
@@ -30,6 +30,10 @@ run-always-on: load-env
 # Frontend (UI in pagi-frontend/components/; bridge URL in Settings)
 run-frontend:
 	cd pagi-frontend && npm run dev
+
+# Start all services: orchestrator, bridge, frontend (uses scripts/start-all.sh; Git Bash on Windows). For PowerShell: .\scripts\start-all.ps1
+start-all:
+	bash scripts/start-all.sh
 
 test: load-env
 	. ./.env 2>/dev/null || true; cd pagi-core-orchestrator && cargo test
